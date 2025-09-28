@@ -1,0 +1,285 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Send, Plus, Camera, FileText, MapPin, BookOpen, DollarSign } from 'lucide-react';
+import { api } from './api';
+
+interface Message {
+  id: string;
+  text: string;
+  isUser: boolean;
+  sources?: string[];
+  timestamp: Date;
+}
+
+interface Task {
+  title: string;
+  due?: string;
+  weight?: number;
+}
+
+interface FinanceSummary {
+  totals: Record<string, number>;
+  roundups: number;
+  runway_days: number;
+}
+
+const PantherUI: React.FC = () => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [showQuickActions, setShowQuickActions] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: inputValue,
+      isUser: true,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
+    setIsLoading(true);
+
+    try {
+      const response = await api.post('/chat', { message: inputValue });
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: response.data.answer,
+        isUser: false,
+        sources: response.data.sources,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: 'Sorry, I encountered an error. Please try again.',
+        isUser: false,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const uploadFile = async (file: File, endpoint: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await api.post(endpoint, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      if (endpoint === '/ingest/campus-doc' && response.data.tasks) {
+        setTasks(prev => [...prev, ...response.data.tasks]);
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Upload error:', error);
+      return null;
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type === 'application/pdf') {
+      uploadFile(file, '/ingest/campus-doc');
+    } else if (file.type.startsWith('image/')) {
+      uploadFile(file, '/ingest/vision');
+    } else if (file.type === 'text/csv') {
+      uploadFile(file, '/finance/upload');
+    }
+  };
+
+  const quickActions = [
+    { icon: BookOpen, label: 'Course Help', action: () => setInputValue('I need help with my course') },
+    { icon: DollarSign, label: 'Finance', action: () => setInputValue('Show me my finance summary') },
+    { icon: MapPin, label: 'Campus Info', action: () => setInputValue('Tell me about campus services') },
+  ];
+
+  return (
+    <div className="h-screen bg-gray-50 flex">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-go-blue text-white p-4 shadow-lg">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold">PANTHER AI</h1>
+            <div className="flex items-center gap-2">
+              <img 
+                src="/fiu-logo.png" 
+                alt="FIU Logo" 
+                className="h-8 w-auto"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="bg-white p-4 border-b">
+          <div className="flex gap-3">
+            {quickActions.map((action, index) => (
+              <button
+                key={index}
+                onClick={action.action}
+                className="flex items-center gap-2 px-4 py-2 bg-go-blue text-white rounded-lg hover:bg-go-blue-light transition-colors"
+              >
+                <action.icon size={16} />
+                <span className="text-sm">{action.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                  message.isUser
+                    ? 'bg-go-blue text-white'
+                    : 'bg-white border border-gray-200'
+                }`}
+              >
+                <p className="text-sm">{message.text}</p>
+                {message.sources && message.sources.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-300">
+                    <p className="text-xs text-gray-600">
+                      Sources: {message.sources.join(', ')}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-gray-200 px-4 py-2 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-go-blue"></div>
+                  <span className="text-sm text-gray-600">Thinking...</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="bg-white border-t p-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowQuickActions(!showQuickActions)}
+              className="p-2 text-gray-600 hover:text-go-blue transition-colors"
+            >
+              <Plus size={20} />
+            </button>
+            <input
+              type="file"
+              id="file-upload"
+              className="hidden"
+              onChange={handleFileUpload}
+              accept=".pdf,.csv,image/*"
+            />
+            <label
+              htmlFor="file-upload"
+              className="p-2 text-gray-600 hover:text-go-blue transition-colors cursor-pointer"
+            >
+              <FileText size={20} />
+            </label>
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask PantherAI anything..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-go-blue"
+              disabled={isLoading}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!inputValue.trim() || isLoading}
+              className="p-2 bg-go-blue text-white rounded-lg hover:bg-go-blue-light transition-colors disabled:opacity-50"
+            >
+              <Send size={20} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel */}
+      <div className="w-80 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+        <div className="space-y-6">
+          {/* Tasks from Syllabus */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Tasks from Syllabus</h3>
+            {tasks.length > 0 ? (
+              <div className="space-y-2">
+                {tasks.map((task, index) => (
+                  <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                    <p className="font-medium text-sm">{task.title}</p>
+                    {task.due && (
+                      <p className="text-xs text-gray-600">Due: {task.due}</p>
+                    )}
+                    {task.weight && (
+                      <p className="text-xs text-gray-600">Weight: {task.weight}%</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No tasks found. Upload a syllabus to get started.</p>
+            )}
+          </div>
+
+          {/* Finance Summary */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Finance Summary</h3>
+            {financeSummary ? (
+              <div className="space-y-2">
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium">Roundups: ${financeSummary.roundups.toFixed(2)}</p>
+                  <p className="text-sm font-medium">Runway: {financeSummary.runway_days} days</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Upload a CSV file to see your finance summary.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PantherUI;
