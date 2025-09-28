@@ -91,3 +91,4 @@ The app is functional with simplified dependencies. Key endpoints tested:
 - Requires valid Gemini API key for full chat functionality
 - Frontend uses Tailwind CSS with Go-Blue color scheme
 - All endpoints return JSON with `{"ok": true/false}` format
+# PantherAI
